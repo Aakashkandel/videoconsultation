@@ -1,11 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { Mic, MicOff, Video, VideoOff, Phone, Monitor, MoreVertical, Users } from 'lucide-react';
+import ZoomVideo from '@zoom/videosdk'
+
 
 export default function VideoTemplate() {
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOn, setIsVideoOn] = useState(true);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [seconds, setSeconds] = useState(0);
+
+
+
 
   useEffect(() => {
     const timer = setInterval(() => {
