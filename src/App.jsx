@@ -1,21 +1,14 @@
 import React from 'react'
-import Input from './Base/Input'
-import Label from './Base/Label'
-import BackButton from './Base/Button/BackButton'
-import { BrowserRouter } from 'react-router-dom'
-import Button from './Base/Button/Button'
-import { DatePicker } from '@mui/x-date-pickers'
-import Date from './Base/Date'
+import { BrowserRouter,Routes,Route } from 'react-router-dom'
+import VideoTemplate from '../components/VideoTemplate'
 
 export default function App() {
   return (
     <>
       <BrowserRouter>
-        <Label required >Name</Label>
-        <Input />
-        <BackButton/>
-        <Button label="Doctor Consultation"/>
-        <Date/>
+        <Routes>
+          <Route path="/video" element={<VideoTemplate/>}/>
+        </Routes>
    
       </BrowserRouter>
     </>
