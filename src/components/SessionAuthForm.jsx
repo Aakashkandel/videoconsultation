@@ -1,17 +1,21 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useDispatch, useSelector } from 'react-redux';
+import { requestUserSession } from '../Redux/slice/userSessionSlice';
 import { Lock, User, Briefcase, Check, AlertCircle, Stethoscope } from 'lucide-react';
 
 export default function SessionAuthForm() {
+  const dispatch = useDispatch();
+  const { data, loading, error } = useSelector((state) => state.userSession);
+
   const [formData, setFormData] = useState({
     sessionName: '',
     userName: '',
     userRole: '',
     sessionPasscode: ''
   });
-  
+
   const [submitted, setSubmitted] = useState(false);
   const [errors, setErrors] = useState({});
-  const [loading, setLoading] = useState(false);
 
   const roles = [
     { id: 'doctor', label: 'Doctor', icon: '👨‍⚕️', color: 'blue' },
@@ -67,19 +71,17 @@ export default function SessionAuthForm() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     const newErrors = validateForm();
-    
+
     if (Object.keys(newErrors).length > 0) {
       setErrors(newErrors);
       return;
     }
 
-    setLoading(true);
-    // Simulate API call
-    setTimeout(() => {
-      setSubmitted(true);
-      setLoading(false);
-      console.log('Session Data:', formData);
-    }, 1500);
+    dispatch(requestUserSession({
+      sessionName: formData.sessionName,
+      userName: formData.userName,
+      sessionPasscode: formData.sessionPasscode,
+    }));
   };
 
   const handleReset = () => {
@@ -92,6 +94,13 @@ export default function SessionAuthForm() {
     setSubmitted(false);
     setErrors({});
   };
+
+  // Effect to handle success
+  useEffect(() => {
+    if (data) {
+      setSubmitted(true);
+    }
+  }, [data]);
 
   const selectedRole = roles.find(r => r.id === formData.userRole);
 
@@ -265,6 +274,13 @@ export default function SessionAuthForm() {
                   </>
                 )}
               </button>
+
+              {error && (
+                <p className="mt-2 text-sm text-red-600 flex items-center gap-1">
+                  <AlertCircle className="w-4 h-4" />
+                  {error}
+                </p>
+              )}
             </div>
           ) : (
             <div className="space-y-6">
@@ -332,7 +348,6 @@ export default function SessionAuthForm() {
           )}
         </div>
 
-        {/* Footer */}
         <p className="text-center text-gray-500 text-xs mt-6">
           © 2024 Session Manager. All rights reserved.
         </p>

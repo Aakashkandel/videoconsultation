@@ -12,6 +12,7 @@ app.use(cors());
 app.post("/getSignature", (req, res) => {
   try {
     const { sessionName, userName, sessionPasscode } = req.body;
+    console.log("this is the data from frontend",sessionName,userName,sessionPasscode)
 
     if (!sessionName || !userName || !sessionPasscode) {
       return res.status(400).json({ error: "Missing sessionName, userName or sessionPasscode" });

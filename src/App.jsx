@@ -1,7 +1,8 @@
 import React from 'react'
 import { BrowserRouter,Routes,Route } from 'react-router-dom'
-import VideoTemplate from '../components/VideoTemplate'
-import SessionAuthForm from '../components/SessionAuthForm'
+import VideoTemplate from './components/VideoTemplate'
+import SessionAuthForm from './components/SessionAuthForm'
+
 
 export default function App() {
   return (
