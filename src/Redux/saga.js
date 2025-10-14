@@ -4,12 +4,14 @@ import { requestUserSessionSuccess, requestUserSessionFailure } from './slice/us
 
 function* userSessionInfoApi(action) {
   try {
-    const { sessionName, userName, sessionPasscode } = action.payload;
+    const { sessionName, userName, sessionPasscode, userRole } = action.payload;
     const response = yield call(axiosInstance.post, '/getSignature', {
       sessionName,
       userName,
       sessionPasscode,
+      userRole,
     });
+    console.log(response,"this is response")
     yield put(requestUserSessionSuccess(response.data));
   } catch (error) {
     yield put(requestUserSessionFailure(error.message));

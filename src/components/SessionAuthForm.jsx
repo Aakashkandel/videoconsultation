@@ -81,6 +81,7 @@ export default function SessionAuthForm() {
       sessionName: formData.sessionName,
       userName: formData.userName,
       sessionPasscode: formData.sessionPasscode,
+      userRole: formData.userRole,
     }));
   };
 

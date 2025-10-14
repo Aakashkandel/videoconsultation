@@ -11,22 +11,29 @@ app.use(cors());
 
 app.post("/getSignature", (req, res) => {
   try {
-    const { sessionName, userName, sessionPasscode } = req.body;
-    console.log("this is the data from frontend",sessionName,userName,sessionPasscode)
+    const { sessionName, userName, sessionPasscode, userRole } = req.body;
+    console.log("this is the data from frontend",sessionName,userName,sessionPasscode,userRole)
 
-    if (!sessionName || !userName || !sessionPasscode) {
-      return res.status(400).json({ error: "Missing sessionName, userName or sessionPasscode" });
+    if (!sessionName || !userName || !sessionPasscode || !userRole) {
+      return res.status(400).json({ error: "Missing sessionName, userName, sessionPasscode or userRole" });
     }
 
     if (!process.env.VIDEOSDK_API_KEY || !process.env.VIDEOSDK_SECRET_KEY) {
       throw new Error("Missing VIDEOSDK_API_KEY or VIDEOSDK_SECRET_KEY in environment");
     }
 
+    // Map userRole to role: doctor = 1 (admin), patient = 0 (user)
+    const role = userRole === 'doctor' ? 1 : 0;
+
+    // Set permissions based on role
+    const permissions = role === 1 ? ["allow_join", "allow_mod"] : ["allow_join"];
+
     const payload = {
       apikey: process.env.VIDEOSDK_API_KEY,
-      permissions: ["allow_join", "allow_mod"],
+      permissions: permissions,
+      role: role,
       iat: Math.floor(Date.now() / 1000) - 30,
-      exp: Math.floor(Date.now() / 1000) + 60 * 60 * 2, 
+      exp: Math.floor(Date.now() / 1000) + 60 * 60 * 2,
     };
 
     const VIDEO_SDK_JWT = jwt.sign(payload, process.env.VIDEOSDK_SECRET_KEY, {
@@ -38,6 +45,7 @@ app.post("/getSignature", (req, res) => {
       signature: VIDEO_SDK_JWT,
       user_name: userName,
       session_passcode: sessionPasscode,
+      role: role,
     };
 
     return res.json(meetingData);
