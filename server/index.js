@@ -9,10 +9,18 @@ const app = express();
 app.use(express.json());
 app.use(cors());
 
+const generateSessionCode = () => {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let code = '';
+  for (let i = 0; i < 6; i++) {
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return code;
+};
+
 app.post("/getSignature", (req, res) => {
   try {
     const { sessionName, userName, sessionPasscode, userRole } = req.body;
-    console.log("this is the data from frontend",sessionName,userName,sessionPasscode,userRole)
 
     if (!sessionName || !userName || !sessionPasscode || !userRole) {
       return res.status(400).json({ error: "Missing sessionName, userName, sessionPasscode or userRole" });
@@ -22,10 +30,7 @@ app.post("/getSignature", (req, res) => {
       throw new Error("Missing VIDEOSDK_API_KEY or VIDEOSDK_SECRET_KEY in environment");
     }
 
-    // Map userRole to role: doctor = 1 (admin), patient = 0 (user)
     const role = userRole === 'doctor' ? 1 : 0;
-
-    // Set permissions based on role
     const permissions = role === 1 ? ["allow_join", "allow_mod"] : ["allow_join"];
 
     const payload = {
@@ -40,17 +45,19 @@ app.post("/getSignature", (req, res) => {
       algorithm: "HS256",
     });
 
+    const sessionCode = generateSessionCode();
+
     const meetingData = {
       session_name: sessionName,
       signature: VIDEO_SDK_JWT,
       user_name: userName,
       session_passcode: sessionPasscode,
       role: role,
+      session_code: sessionCode,
     };
 
     return res.json(meetingData);
   } catch (error) {
-    console.error("Error generating VideoSDK signature:", error);
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
