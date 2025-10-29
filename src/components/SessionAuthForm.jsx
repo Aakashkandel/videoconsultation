@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
+import { useNavigate } from 'react-router-dom';
 import { requestUserSession } from '../Redux/slice/userSessionSlice';
 import { Lock, User, Briefcase, Check, AlertCircle, Stethoscope } from 'lucide-react';
 
 export default function SessionAuthForm() {
   const dispatch = useDispatch();
+  const navigate = useNavigate();
   const { data, loading, error } = useSelector((state) => state.userSession);
 
   const [formData, setFormData] = useState({
@@ -100,8 +102,12 @@ export default function SessionAuthForm() {
   useEffect(() => {
     if (data) {
       setSubmitted(true);
+      // Navigate to video page after successful authentication
+      setTimeout(() => {
+        navigate('/video');
+      }, 2000); // Small delay to show success message
     }
-  }, [data]);
+  }, [data, navigate]);
 
   const selectedRole = roles.find(r => r.id === formData.userRole);
 
