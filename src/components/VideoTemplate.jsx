@@ -1,150 +1,135 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useSelector } from 'react-redux';
 import { Mic, MicOff, Video, VideoOff, Phone, Monitor, MoreVertical, Users } from 'lucide-react';
-import ZoomVideo from '@zoom/videosdk'
-
+import ZoomVideo from '@zoom/videosdk';
+import './VideoTemplate.css';
 
 export default function VideoTemplate() {
+  // Get session data from Redux (contains session_name, signature, user_name, role, passcode)
   const { data: sessionData } = useSelector((state) => state.userSession);
   const [client, setClient] = useState(null);
   const [stream, setStream] = useState(null);
   const [isMuted, setIsMuted] = useState(false);
-  const [isVideoOn, setIsVideoOn] = useState(true);
+  const [isVideoOn, setIsVideoOn] = useState(false);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [seconds, setSeconds] = useState(0);
   const [isConnected, setIsConnected] = useState(false);
   const [participants, setParticipants] = useState([]);
   const [activeParticipant, setActiveParticipant] = useState(null);
+  const [isVideoLoading, setIsVideoLoading] = useState(true);
+  const [isTogglingVideo, setIsTogglingVideo] = useState(false);
+  const videoPlayerRef = useRef(null);
+  const selfVideoPlayerRef = useRef(null);
 
-  // Initialize Zoom client and join session
   useEffect(() => {
-    if (sessionData && !client) {
-      initializeZoomSession();
-    }
+    if (sessionData && !client) initializeZoomSession();
   }, [sessionData, client]);
 
-  // Timer effect
   useEffect(() => {
-    const timer = setInterval(() => {
-      setSeconds(prev => prev + 1);
-    }, 1000);
+    const timer = setInterval(() => setSeconds((prev) => prev + 1), 1000);
     return () => clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    if (client && stream && isConnected) updateVideoDisplay(client);
+  }, [activeParticipant, isVideoOn, client, stream, isConnected]);
+
+  useEffect(() => {
+    return () => {
+      if (stream && client) {
+        const cleanup = async () => {
+          try {
+            const allUsers = client.getAllUser();
+            for (const user of allUsers) {
+              await stream.detachVideo(user.userId).catch(() => {});
+            }
+          } catch {}
+        };
+        cleanup();
+      }
+    };
+  }, [stream, client]);
 
   const initializeZoomSession = async () => {
     try {
       const zoomClient = ZoomVideo.createClient();
       setClient(zoomClient);
-
       await zoomClient.init('en-US', 'Global', { patchJsMedia: true });
 
       const mediaStream = zoomClient.getMediaStream();
       setStream(mediaStream);
 
+      // Join same session using same session_name + passcode = same room
       await zoomClient.join(
-        sessionData.session_name,
-        sessionData.signature,
+        sessionData.session_name,    // Same name = same room
+        sessionData.signature,       // JWT with role (1=doctor, 0=patient)
         sessionData.user_name,
-        sessionData.session_passcode
+        sessionData.session_passcode // Same passcode = same room
       );
 
       setIsConnected(true);
+      zoomClient.on('user-added', () => updateParticipants(zoomClient));
+      zoomClient.on('user-removed', () => updateParticipants(zoomClient));
+      zoomClient.on('user-updated', () => updateParticipants(zoomClient));
+      zoomClient.on('peer-video-state-change', () => updateParticipants(zoomClient));
 
-      // Set up event listeners
-      zoomClient.on('user-added', (payload) => updateParticipants(zoomClient));
-      zoomClient.on('user-removed', (payload) => updateParticipants(zoomClient));
-      zoomClient.on('user-updated', (payload) => updateParticipants(zoomClient));
-      zoomClient.on('peer-video-state-change', (payload) => handleVideoStateChange(payload, zoomClient));
-
-      // Request camera and microphone permissions first
       await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-
-      // Start video and audio
       await mediaStream.startAudio();
       await mediaStream.startVideo();
-
-      updateVideoDisplay(zoomClient);
-
+      setIsVideoOn(true);
+      setIsVideoLoading(false);
+      setTimeout(() => updateVideoDisplay(zoomClient), 500);
     } catch (error) {
       console.error('Failed to initialize Zoom session:', error);
-      // Handle permission denied or other errors
       if (error.name === 'NotAllowedError') {
         alert('Camera and microphone permissions are required for video calls.');
       }
     }
   };
 
-  const updateParticipants = async (zoomClient) => {
+  const updateParticipants = (zoomClient) => {
     const participantList = zoomClient.getAllUser();
     setParticipants(participantList);
 
-    // Prioritize doctor's video in big screen
     const selfUserId = zoomClient.getCurrentUserInfo().userId;
-    const otherParticipants = participantList.filter(p => p.userId !== selfUserId);
-    const doctorParticipant = otherParticipants.find(p => p.role === 1);
-
-    if (doctorParticipant) {
-      setActiveParticipant(doctorParticipant);
-    } else if (otherParticipants.length > 0) {
-      setActiveParticipant(otherParticipants[0]);
-    } else {
-      setActiveParticipant(null);
-    }
-
-    updateVideoDisplay(zoomClient);
+    const others = participantList.filter((p) => p.userId !== selfUserId);
+    // Prioritize showing doctor (role=1) in main screen
+    const doctor = others.find((p) => p.role === 1);
+    setActiveParticipant(doctor || others[0] || null);
   };
 
   const updateVideoDisplay = async (zoomClient) => {
-    const bigContainer = document.querySelector('#video-player-container');
-    const smallContainer = document.querySelector('#self-video-container');
-
-    bigContainer.innerHTML = '';
-    smallContainer.innerHTML = '';
+    if (!stream || !zoomClient || !videoPlayerRef.current) return;
 
     const selfUserId = zoomClient.getCurrentUserInfo().userId;
-
-    if (activeParticipant) {
-      // Show self in small screen, participant in big screen
-      if (isVideoOn) {
-        const selfVideo = await stream.attachVideo(selfUserId, 3);
-        smallContainer.appendChild(selfVideo);
-      }
-      if (activeParticipant.bVideoOn) {
-        const participantVideo = await stream.attachVideo(activeParticipant.userId, 3);
-        bigContainer.appendChild(participantVideo);
-      }
-    } else {
-      // No participants, show self in big screen
-      if (isVideoOn) {
-        const selfVideo = await stream.attachVideo(selfUserId, 3);
-        bigContainer.appendChild(selfVideo);
-      }
-    }
-  };
-
-  const handleVideoStateChange = async (payload, zoomClient) => {
-    const { userId, action } = payload;
-
-    if (action === 'Start') {
-      const userVideo = await stream.attachVideo(userId, 3);
-      document.querySelector('#video-player-container').appendChild(userVideo);
-    } else if (action === 'Stop') {
-      stream.detachVideo(userId);
-    }
-
-    updateVideoDisplay(zoomClient);
-  };
-
-  // Control handlers
-  const handleToggleMute = async () => {
-    if (!stream) return;
+    const currentUser = zoomClient.getCurrentUserInfo();
 
     try {
-      if (isMuted) {
-        await stream.unmuteAudio();
+      if (!activeParticipant) {
+        if (activeParticipant?.bVideoOn) await stream.detachVideo(activeParticipant.userId).catch(() => {});
+        if (currentUser?.bVideoOn && videoPlayerRef.current)
+          await stream.attachVideo(selfUserId, 3, videoPlayerRef.current).catch(() => {});
       } else {
-        await stream.muteAudio();
+        if (currentUser?.bVideoOn && videoPlayerRef.current)
+          await stream.detachVideo(selfUserId).catch(() => {});
+        if (activeParticipant?.bVideoOn && videoPlayerRef.current)
+          await stream.attachVideo(activeParticipant.userId, 3, videoPlayerRef.current).catch(() => {});
       }
+
+      if (activeParticipant && currentUser?.bVideoOn && selfVideoPlayerRef.current) {
+        await stream.attachVideo(selfUserId, 3, selfVideoPlayerRef.current).catch(() => {});
+      } else if (activeParticipant && selfVideoPlayerRef.current) {
+        await stream.detachVideo(selfUserId).catch(() => {});
+      }
+    } catch (error) {
+      console.error('Error updating video display:', error);
+    }
+  };
+
+  const handleToggleMute = async () => {
+    if (!stream) return;
+    try {
+      isMuted ? await stream.unmuteAudio() : await stream.muteAudio();
       setIsMuted(!isMuted);
     } catch (error) {
       console.error('Error toggling mute:', error);
@@ -152,30 +137,30 @@ export default function VideoTemplate() {
   };
 
   const handleToggleVideo = async () => {
-    if (!stream) return;
-
+    if (!stream || !client || isTogglingVideo) return;
+    setIsTogglingVideo(true);
     try {
       if (isVideoOn) {
         await stream.stopVideo();
+        setTimeout(() => {
+          setIsVideoOn(false);
+          setIsTogglingVideo(false);
+        }, 100);
       } else {
         await stream.startVideo();
+        setIsVideoOn(true);
+        setIsTogglingVideo(false);
       }
-      setIsVideoOn(!isVideoOn);
-      updateVideoDisplay(client);
     } catch (error) {
       console.error('Error toggling video:', error);
+      setIsTogglingVideo(false);
     }
   };
 
   const handleToggleScreenShare = async () => {
     if (!stream) return;
-
     try {
-      if (isScreenSharing) {
-        await stream.stopShareScreen();
-      } else {
-        await stream.startShareScreen();
-      }
+      isScreenSharing ? await stream.stopShareScreen() : await stream.startShareScreen();
       setIsScreenSharing(!isScreenSharing);
     } catch (error) {
       console.error('Error toggling screen share:', error);
@@ -183,31 +168,20 @@ export default function VideoTemplate() {
   };
 
   const handleLeaveSession = async () => {
-    if (!client) return;
-
+    if (!client || !stream) return;
     try {
-      // Detach all videos
       const allUsers = client.getAllUser();
-      for (const user of allUsers) {
-        try {
-          await stream.detachVideo(user.userId);
-        } catch (error) {
-          console.error('Error detaching video for user:', user.userId, error);
-        }
-      }
-
-      // Clear containers
-      document.querySelector('#video-player-container').innerHTML = '';
-      document.querySelector('#self-video-container').innerHTML = '';
-
+      for (const user of allUsers) await stream.detachVideo(user.userId).catch(() => {});
+      await stream.stopVideo();
+      await stream.stopAudio();
       await client.leave();
       setIsConnected(false);
       setClient(null);
       setStream(null);
       setActiveParticipant(null);
       window.location.href = '/sessionauth';
-    } catch (error) {
-      console.error('Error leaving session:', error);
+    } catch {
+      window.location.href = '/sessionauth';
     }
   };
 
@@ -222,11 +196,19 @@ export default function VideoTemplate() {
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-4 bg-gray-900/50 backdrop-blur-sm">
         <div className="flex items-center gap-3">
-          <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></div>
-          <span className="text-white font-medium">Meeting in Progress</span>
+          <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+          <span className="text-white font-medium">Video Consultation</span>
           <span className="text-gray-400 text-sm">{formatTime(seconds)}</span>
+                    {/* Show user's role: 1=Doctor, 0=Patient */}
+          {sessionData?.role === 1 && (
+            <span className="px-2 py-1 bg-blue-600 text-white text-xs rounded-full">Doctor</span>
+          )}
+          {sessionData?.role === 0 && (
+            <span className="px-2 py-1 bg-green-600 text-white text-xs rounded-full">Patient</span>
+          )}
         </div>
         <div className="flex items-center gap-2">
+          <div className="text-gray-300 text-sm">Participants: {participants.length}</div>
           <button className="p-2 hover:bg-gray-700 rounded-lg transition-colors">
             <Users className="w-5 h-5 text-gray-300" />
           </button>
@@ -236,54 +218,81 @@ export default function VideoTemplate() {
         </div>
       </div>
 
-      {/* Video area */}
+      {/* Video Section */}
       <div className="flex-1 relative p-6">
         <div className="w-full h-full bg-gray-800 rounded-2xl overflow-hidden relative shadow-2xl">
-          {/* Main participant video area */}
-          {/* Main participant video area */}
-          <div className="w-full h-full relative">
-            <div id="video-player-container" className="w-full h-full">
-              {!activeParticipant && !isVideoOn && (
-                <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-blue-900/30 to-purple-900/30">
-                  <div className="text-center">
-                    <div className="w-32 h-32 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center mx-auto mb-4 shadow-lg">
-                      <span className="text-white text-4xl font-bold">W</span>
-                    </div>
-                    <h3 className="text-white text-2xl font-semibold">Waiting for participants...</h3>
-                    <p className="text-gray-400 mt-1">Share the session details to invite others</p>
+          <video-player-container style={{ width: '100%', height: '100%', position: 'absolute', top: 0, left: 0 }}>
+            {/* Main video area: shows other participant if joined, else shows self */}
+            {activeParticipant ? (
+              <>
+                <video-player ref={videoPlayerRef} style={{ width: '100%', height: '100%' }} />
+                <div className="absolute bottom-4 left-4 bg-black/60 backdrop-blur-md px-4 py-2 rounded-lg z-10">
+                  <div className="flex items-center gap-2">
+                    <p className="text-white font-medium">
+                      {activeParticipant.displayName || 'Participant'}
+                    </p>
+                    {activeParticipant.role === 1 && (
+                      <span className="px-2 py-0.5 bg-blue-600 text-white text-xs rounded-full">Dr.</span>
+                    )}
                   </div>
                 </div>
-              )}
-            </div>
-
-            {activeParticipant && (
-              <div className="absolute bottom-4 left-4 bg-black/60 backdrop-blur-md px-4 py-2 rounded-lg">
-                <p className="text-white font-medium">{activeParticipant.displayName || 'Participant'}</p>
-              </div>
-            )}
-          </div>
-
-          {/* Self video - only when participants present */}
-          {activeParticipant && (
-            <div className="absolute top-6 right-6 w-64 h-48 bg-gray-900 rounded-xl overflow-hidden shadow-2xl border-2 border-gray-700 hover:border-blue-500 transition-all cursor-pointer group">
-              <div id="self-video-container" className="w-full h-full">
+              </>
+            ) : (
+              <>
+                <video-player
+                  ref={videoPlayerRef}
+                  style={{
+                    width: '100%',
+                    height: '100%',
+                    display: isVideoOn ? 'block' : 'none',
+                  }}
+                />
                 {!isVideoOn && (
-                  <div className="absolute inset-0 flex items-center justify-center bg-gray-900">
+                  <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-blue-900/30 to-purple-900/30">
+                    <div className="text-center">
+                      <div className="w-32 h-32 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center mx-auto mb-4 shadow-lg">
+                        <span className="text-white text-4xl font-bold">
+                          {sessionData?.user_name?.charAt(0).toUpperCase() || 'U'}
+                        </span>
+                      </div>
+                      <h3 className="text-white text-2xl font-semibold">Camera is off</h3>
+                      <p className="text-gray-400 mt-1">Click the video button to turn on your camera</p>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </video-player-container>
+
+          {/* Small video box: shows your own video when other participant is active */}
+          {activeParticipant && (
+            <div className="absolute top-6 right-6 w-64 h-48 bg-gray-900 rounded-xl overflow-hidden shadow-2xl border-2 border-gray-700 hover:border-blue-500 transition-all cursor-pointer group z-20">
+              <video-player-container style={{ width: '100%', height: '100%', position: 'relative' }}>
+                <video-player
+                  ref={selfVideoPlayerRef}
+                  style={{
+                    width: '100%',
+                    height: '100%',
+                    display: isVideoOn ? 'block' : 'none',
+                  }}
+                />
+                {!isVideoOn && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-gray-900 z-10">
                     <div className="text-center">
                       <VideoOff className="w-12 h-12 text-gray-500 mb-2" />
                       <p className="text-gray-400 text-sm">Camera Off</p>
                     </div>
                   </div>
                 )}
-              </div>
-              <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                {isMuted && isVideoOn && (
+                  <div className="absolute top-2 left-2 bg-red-500 p-1.5 rounded-full z-10">
+                    <MicOff className="w-3 h-3 text-white" />
+                  </div>
+                )}
+              </video-player-container>
+              <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center pointer-events-none">
                 <span className="text-white text-xs">Your Video</span>
               </div>
-              {isMuted && (
-                <div className="absolute top-2 left-2 bg-red-500 p-1.5 rounded-full">
-                  <MicOff className="w-3 h-3 text-white" />
-                </div>
-              )}
             </div>
           )}
         </div>
@@ -295,29 +304,22 @@ export default function VideoTemplate() {
           <button
             onClick={handleToggleMute}
             className={`p-4 rounded-full transition-all transform hover:scale-110 ${
-              isMuted
-                ? 'bg-red-500 hover:bg-red-600'
-                : 'bg-gray-700 hover:bg-gray-600'
+              isMuted ? 'bg-red-500 hover:bg-red-600' : 'bg-gray-700 hover:bg-gray-600'
             }`}
-            title={isMuted ? 'Unmute' : 'Mute'}
           >
-            {isMuted ? (
-              <MicOff className="w-6 h-6 text-white" />
-            ) : (
-              <Mic className="w-6 h-6 text-white" />
-            )}
+            {isMuted ? <MicOff className="w-6 h-6 text-white" /> : <Mic className="w-6 h-6 text-white" />}
           </button>
 
           <button
             onClick={handleToggleVideo}
+            disabled={isTogglingVideo}
             className={`p-4 rounded-full transition-all transform hover:scale-110 ${
-              !isVideoOn
-                ? 'bg-red-500 hover:bg-red-600'
-                : 'bg-gray-700 hover:bg-gray-600'
-            }`}
-            title={isVideoOn ? 'Turn off camera' : 'Turn on camera'}
+              !isVideoOn ? 'bg-red-500 hover:bg-red-600' : 'bg-gray-700 hover:bg-gray-600'
+            } ${isTogglingVideo ? 'opacity-50 cursor-not-allowed' : ''}`}
           >
-            {isVideoOn ? (
+            {isTogglingVideo ? (
+              <div className="w-6 h-6 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+            ) : isVideoOn ? (
               <Video className="w-6 h-6 text-white" />
             ) : (
               <VideoOff className="w-6 h-6 text-white" />
@@ -327,11 +329,8 @@ export default function VideoTemplate() {
           <button
             onClick={handleToggleScreenShare}
             className={`p-4 rounded-full transition-all transform hover:scale-110 ${
-              isScreenSharing
-                ? 'bg-blue-500 hover:bg-blue-600'
-                : 'bg-gray-700 hover:bg-gray-600'
+              isScreenSharing ? 'bg-blue-500 hover:bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'
             }`}
-            title="Share screen"
           >
             <Monitor className="w-6 h-6 text-white" />
           </button>
@@ -339,25 +338,16 @@ export default function VideoTemplate() {
           <button
             onClick={handleLeaveSession}
             className="p-4 rounded-full bg-red-500 hover:bg-red-600 transition-all transform hover:scale-110 ml-2"
-            title="End call"
           >
             <Phone className="w-6 h-6 text-white transform rotate-135" />
           </button>
         </div>
 
         <div className="max-w-2xl mx-auto flex items-center justify-center gap-4 mt-2">
-          <span className="text-xs text-gray-400 w-14 text-center">
-            {isMuted ? 'Unmute' : 'Mute'}
-          </span>
-          <span className="text-xs text-gray-400 w-14 text-center">
-            {isVideoOn ? 'Stop' : 'Start'}
-          </span>
-          <span className="text-xs text-gray-400 w-14 text-center">
-            {isScreenSharing ? 'Stop' : 'Share'}
-          </span>
-          <span className="text-xs text-red-400 w-14 text-center ml-2">
-            Leave
-          </span>
+          <span className="text-xs text-gray-400 w-14 text-center">{isMuted ? 'Unmute' : 'Mute'}</span>
+          <span className="text-xs text-gray-400 w-14 text-center">{isVideoOn ? 'Stop' : 'Start'}</span>
+          <span className="text-xs text-gray-400 w-14 text-center">{isScreenSharing ? 'Stop' : 'Share'}</span>
+          <span className="text-xs text-red-400 w-14 text-center ml-2">Leave</span>
         </div>
       </div>
     </div>

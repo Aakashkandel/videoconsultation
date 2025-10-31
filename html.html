@@ -29,10 +29,9 @@ app.post("/getSignature", (req, res) => {
     const oHeader = { alg: 'HS256', typ: 'JWT' }
 
     const oPayload = {
-      app_key: process.env.VIDEOSDK_SDK_KEY,
-      tpc: sessionName,
-      role_type: role,
-      version: 1,
+      apikey: process.env.VIDEOSDK_SDK_KEY,
+      permissions: permissions,
+      role: role,
       iat: Math.floor(Date.now() / 1000) - 30,
       exp: Math.floor(Date.now() / 1000) + 60 * 60 * 2,
     };
