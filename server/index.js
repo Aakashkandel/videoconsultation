@@ -6,6 +6,15 @@ import KJUR from 'jsrsasign';
 dotenv.config();
 
 const app = express();
+
+// Enable SharedArrayBuffer for Zoom Video SDK
+// These headers are required for 720p WebAssembly video, background noise suppression, and virtual backgrounds
+app.use((req, res, next) => {
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+  res.setHeader('Cross-Origin-Embedder-Policy', 'require-corp');
+  next();
+});
+
 app.use(express.json());
 app.use(cors());
 

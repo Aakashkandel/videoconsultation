@@ -16,17 +16,32 @@ export default function VideoTemplate() {
   const [participants, setParticipants] = useState([]);
   const [activeParticipant, setActiveParticipant] = useState(null);
   const [seconds, setSeconds] = useState(0);
-
   const [isVideoLoading, setIsVideoLoading] = useState(true);
   const [isTogglingVideo, setIsTogglingVideo] = useState(false);
   const [isTogglingAudio, setIsTogglingAudio] = useState(false);
+  const [systemCapabilities, setSystemCapabilities] = useState({
+    video: false,
+    audio: false,
+    screen: false,
+    webRTC: false,
+    hasSharedArrayBuffer: false,
+    hardwareConcurrency: 0,
+  });
+  const [showCapabilityWarning, setShowCapabilityWarning] = useState(false);
+  const [currentResolution, setCurrentResolution] = useState(null);
 
   const videoPlayerRef = useRef(null);
   const selfVideoPlayerRef = useRef(null);
 
   useEffect(() => {
-    if (sessionData && !client) initializeZoomSession();
-  }, [sessionData, client]);
+    checkSystemCapabilities();
+  }, []);
+
+  useEffect(() => {
+    if (sessionData && !client && systemCapabilities.video && systemCapabilities.audio) {
+      initializeZoomSession();
+    }
+  }, [sessionData, client, systemCapabilities]);
 
   useEffect(() => {
     const timer = setInterval(() => setSeconds((prev) => prev + 1), 1000);
@@ -40,7 +55,7 @@ export default function VideoTemplate() {
     }
   }, [activeParticipant, isVideoOn, client, stream, isConnected]);
 
-  // Cleanup on component unmount
+  // Cleanup Zoom resources on unmount
   useEffect(() => {
     return () => {
       if (stream && client) {
@@ -48,7 +63,6 @@ export default function VideoTemplate() {
           try {
             if (videoPlayerRef.current) videoPlayerRef.current.innerHTML = '';
             if (selfVideoPlayerRef.current) selfVideoPlayerRef.current.innerHTML = '';
-
             const allUsers = client.getAllUser();
             for (const user of allUsers) {
               await stream.detachVideo(user.userId).catch(() => {});
@@ -61,13 +75,51 @@ export default function VideoTemplate() {
     };
   }, [stream, client]);
 
-  /** Initialize Zoom session and join */
+  // Check browser and system video capabilities
+  const checkSystemCapabilities = async () => {
+    try {
+      const hasSharedArrayBuffer = typeof SharedArrayBuffer !== 'undefined';
+      const hardwareConcurrency = navigator.hardwareConcurrency || 0;
+      const systemRequirements = ZoomVideo.checkSystemRequirements();
+
+      setSystemCapabilities({
+        video: systemRequirements.video,
+        audio: systemRequirements.audio,
+        screen: systemRequirements.screen,
+        webRTC: systemRequirements.webRTC,
+        hasSharedArrayBuffer,
+        hardwareConcurrency,
+      });
+
+      if (!systemRequirements.video || !systemRequirements.audio) {
+        setShowCapabilityWarning(true);
+      }
+    } catch (error) {
+      console.error('Error checking system capabilities:', error);
+      setSystemCapabilities({
+        video: true,
+        audio: true,
+        screen: true,
+        webRTC: false,
+        hasSharedArrayBuffer: false,
+        hardwareConcurrency: 0,
+      });
+    }
+  };
+
+  // Initialize Zoom client and join session
   const initializeZoomSession = async () => {
     try {
       const zoomClient = ZoomVideo.createClient();
       setClient(zoomClient);
-      await zoomClient.init('en-US', 'Global', { patchJsMedia: true });
 
+      const initOptions = {
+        patchJsMedia: true,
+        enforceVirtualBackground:
+          !systemCapabilities.hasSharedArrayBuffer && /Chrome/.test(navigator.userAgent),
+      };
+
+      await zoomClient.init('en-US', 'Global', initOptions);
       const mediaStream = zoomClient.getMediaStream();
       setStream(mediaStream);
 
@@ -86,7 +138,6 @@ export default function VideoTemplate() {
         updateParticipants(zoomClient);
       });
       zoomClient.on('user-updated', () => updateParticipants(zoomClient));
-
       zoomClient.on('peer-video-state-change', async (payload) => {
         if (payload?.userId) {
           updateParticipants(zoomClient);
@@ -95,58 +146,61 @@ export default function VideoTemplate() {
         }
       });
 
+      zoomClient.on('video-statistic-data-change', (payload) => {
+        if (payload && payload.height) setCurrentResolution(payload.height);
+      });
+
       await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
       await mediaStream.startAudio();
       await mediaStream.startVideo();
       setIsVideoOn(true);
       setIsVideoLoading(false);
-
       await new Promise((r) => setTimeout(r, 500));
       updateVideoDisplay(zoomClient);
     } catch (error) {
       console.error('Failed to initialize Zoom session:', error);
       if (error.name === 'NotAllowedError') {
         alert('Camera and microphone permissions are required.');
+      } else if (error.type === 'INSUFFICIENT_PRIVILEGES') {
+        alert('This device or browser does not support the required features.');
       }
     }
   };
 
-  /** Update participant list and active participant (doctor prioritized) */
   const updateParticipants = (zoomClient) => {
     const allUsers = zoomClient.getAllUser();
     setParticipants(allUsers);
-
     const selfUserId = zoomClient.getCurrentUserInfo().userId;
     const others = allUsers.filter((u) => u.userId !== selfUserId);
     const doctor = others.find((u) => u.role === 1);
     const newActive = doctor || others[0] || null;
-
-    if (newActive?.userId !== activeParticipant?.userId) {
-      setActiveParticipant(newActive);
-    }
+    if (newActive?.userId !== activeParticipant?.userId) setActiveParticipant(newActive);
   };
 
-  /** Attach/detach and render active and self videos */
+  const getResolutionLabel = (height) => {
+    if (height >= 1080) return '1080p';
+    if (height >= 720) return '720p';
+    if (height >= 480) return '480p';
+    return '360p';
+  };
+
+  // Attach or detach video streams
   const updateVideoDisplay = async (zoomClient) => {
     if (!stream || !zoomClient) return;
-
     const selfUserId = zoomClient.getCurrentUserInfo().userId;
     const currentUser = zoomClient.getCurrentUserInfo();
 
     try {
       const allUsers = zoomClient.getAllUser();
       for (const user of allUsers) await stream.detachVideo(user.userId).catch(() => {});
-
       if (videoPlayerRef.current) videoPlayerRef.current.innerHTML = '';
       if (selfVideoPlayerRef.current) selfVideoPlayerRef.current.innerHTML = '';
 
-      // Show other participant if available, else show self
       if (activeParticipant) {
         if (activeParticipant.bVideoOn && videoPlayerRef.current) {
           const participantVideo = await stream.attachVideo(activeParticipant.userId, 3);
           if (participantVideo) videoPlayerRef.current.appendChild(participantVideo);
         }
-
         if (currentUser?.bVideoOn && isVideoOn && selfVideoPlayerRef.current) {
           const selfVideo = await stream.attachVideo(selfUserId, 3);
           if (selfVideo) selfVideoPlayerRef.current.appendChild(selfVideo);
@@ -160,7 +214,6 @@ export default function VideoTemplate() {
     }
   };
 
-  /** Mute/unmute microphone */
   const handleToggleMute = async () => {
     if (!stream || !client) return;
     setIsTogglingAudio(true);
@@ -175,13 +228,11 @@ export default function VideoTemplate() {
     }
   };
 
-  /** Start/stop video stream */
   const handleToggleVideo = async () => {
     if (!stream || !client || isTogglingVideo) return;
     setIsTogglingVideo(true);
     try {
       const selfUserId = client.getCurrentUserInfo().userId;
-
       if (isVideoOn) {
         await stream.detachVideo(selfUserId).catch(() => {});
         if (videoPlayerRef.current && !activeParticipant) videoPlayerRef.current.innerHTML = '';
@@ -192,7 +243,6 @@ export default function VideoTemplate() {
         await stream.startVideo();
         setIsVideoOn(true);
         await new Promise((r) => setTimeout(r, 150));
-
         const selfVideo = await stream.attachVideo(selfUserId, 3);
         if (activeParticipant && selfVideoPlayerRef.current) {
           selfVideoPlayerRef.current.innerHTML = '';
@@ -210,18 +260,23 @@ export default function VideoTemplate() {
     }
   };
 
-  /** Start/stop screen sharing */
   const handleToggleScreenShare = async () => {
     if (!stream) return;
+    if (!systemCapabilities.screen) {
+      alert('Screen sharing is not supported on this device/browser.');
+      return;
+    }
     try {
       isScreenSharing ? await stream.stopShareScreen() : await stream.startShareScreen();
       setIsScreenSharing(!isScreenSharing);
     } catch (error) {
       console.error('Error toggling screen share:', error);
+      if (error.reason !== 'user cancel') {
+        alert('Failed to start screen sharing. Please try again.');
+      }
     }
   };
 
-  /** Leave Zoom session */
   const handleLeaveSession = async () => {
     if (!client || !stream) return;
     try {
@@ -242,6 +297,29 @@ export default function VideoTemplate() {
 
   return (
     <div className="h-screen w-full bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 flex flex-col">
+      {showCapabilityWarning && (
+        <div className="bg-yellow-600/90 backdrop-blur-sm px-6 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-6 h-6 rounded-full bg-yellow-900 flex items-center justify-center">
+              <span className="text-yellow-300 text-sm font-bold">!</span>
+            </div>
+            <div>
+              <p className="text-white text-sm font-medium">Limited Device Support</p>
+              <p className="text-yellow-100 text-xs">
+                {!systemCapabilities.video && 'Video not supported. '}
+                {!systemCapabilities.audio && 'Audio not supported. '}
+                {!systemCapabilities.hasSharedArrayBuffer && 'Advanced features limited. '}
+                {systemCapabilities.hardwareConcurrency < 4 && 'Low CPU cores detected. '}
+                Please use Chrome, Edge, or Safari for best experience.
+              </p>
+            </div>
+          </div>
+          <button onClick={() => setShowCapabilityWarning(false)} className="text-white hover:text-yellow-200 text-xl px-2">
+            ×
+          </button>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-4 bg-gray-900/50 backdrop-blur-sm">
         <div className="flex items-center gap-3">
@@ -250,8 +328,14 @@ export default function VideoTemplate() {
           <span className="text-gray-400 text-sm">{formatTime(seconds)}</span>
           {sessionData?.role === 1 && <span className="px-2 py-1 bg-blue-600 text-white text-xs rounded-full">Doctor</span>}
           {sessionData?.role === 0 && <span className="px-2 py-1 bg-green-600 text-white text-xs rounded-full">Patient</span>}
+          {isConnected && currentResolution && (
+            <span className="px-2 py-1 bg-gray-700 text-gray-300 text-xs rounded-full flex items-center gap-1">
+              {getResolutionLabel(currentResolution)}
+              <span className="text-green-400">●</span>
+              {systemCapabilities.webRTC && <span className="ml-1">WebRTC</span>}
+            </span>
+          )}
         </div>
-
         <div className="flex items-center gap-2">
           <div className="text-gray-300 text-sm">Participants: {participants.length}</div>
           <button className="p-2 hover:bg-gray-700 rounded-lg"><Users className="w-5 h-5 text-gray-300" /></button>
@@ -279,11 +363,7 @@ export default function VideoTemplate() {
               <>
                 <video-player
                   ref={videoPlayerRef}
-                  style={{
-                    width: '100%',
-                    height: '100%',
-                    display: isVideoOn ? 'block' : 'none',
-                  }}
+                  style={{ width: '100%', height: '100%', display: isVideoOn ? 'block' : 'none' }}
                 />
                 {!isVideoOn && (
                   <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-blue-900/30 to-purple-900/30">
@@ -307,11 +387,7 @@ export default function VideoTemplate() {
               <video-player-container style={{ width: '100%', height: '100%' }}>
                 <video-player
                   ref={selfVideoPlayerRef}
-                  style={{
-                    width: '100%',
-                    height: '100%',
-                    display: isVideoOn ? 'block' : 'none',
-                  }}
+                  style={{ width: '100%', height: '100%', display: isVideoOn ? 'block' : 'none' }}
                 />
                 {!isVideoOn && (
                   <div className="absolute inset-0 flex items-center justify-center bg-gray-900 z-10">
@@ -335,7 +411,7 @@ export default function VideoTemplate() {
         </div>
       </div>
 
-      {/* Controls */}
+      {/* Control Buttons */}
       <div className="bg-gray-900/80 backdrop-blur-lg border-t border-gray-800 px-6 py-5">
         <div className="max-w-2xl mx-auto flex items-center justify-center gap-4">
           <button
@@ -363,15 +439,16 @@ export default function VideoTemplate() {
 
           <button
             onClick={handleToggleScreenShare}
-            className={`p-4 rounded-full ${isScreenSharing ? 'bg-blue-500 hover:bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'}`}
+            disabled={!systemCapabilities.screen}
+            className={`p-4 rounded-full ${
+              isScreenSharing ? 'bg-blue-500 hover:bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'
+            } ${!systemCapabilities.screen ? 'opacity-50 cursor-not-allowed' : ''}`}
+            title={!systemCapabilities.screen ? 'Screen sharing not supported' : ''}
           >
             <Monitor className="w-6 h-6 text-white" />
           </button>
 
-          <button
-            onClick={handleLeaveSession}
-            className="p-4 rounded-full bg-red-500 hover:bg-red-600 ml-2"
-          >
+          <button onClick={handleLeaveSession} className="p-4 rounded-full bg-red-500 hover:bg-red-600 ml-2">
             <Phone className="w-6 h-6 text-white rotate-[135deg]" />
           </button>
         </div>
