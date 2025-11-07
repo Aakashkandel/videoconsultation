@@ -120,6 +120,26 @@ export default function SessionAuthForm() {
       </div>
 
       <div className="relative w-full max-w-md">
+        {/* Welcome Section */}
+        <div className="mb-8 text-center">
+          <h1 className="text-4xl font-bold text-gray-800 mb-4">Welcome to Video Consultation</h1>
+          <p className="text-lg text-gray-600 mb-6">Connect with healthcare professionals securely and conveniently from anywhere.</p>
+          <div className="flex justify-center gap-8 text-sm text-gray-500">
+            <div className="flex items-center gap-2">
+              <i className="fas fa-shield-alt text-blue-600"></i>
+              <span>Secure & Private</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <i className="fas fa-video text-blue-600"></i>
+              <span>HD Video Quality</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <i className="fas fa-clock text-blue-600"></i>
+              <span>24/7 Available</span>
+            </div>
+          </div>
+        </div>
+
         {/* Header Card */}
         <div className="mb-6">
           <div className="flex items-center justify-center mb-4">

@@ -19,6 +19,7 @@ export default function VideoTemplate() {
   const [isVideoLoading, setIsVideoLoading] = useState(true);
   const [isTogglingVideo, setIsTogglingVideo] = useState(false);
   const [isTogglingAudio, setIsTogglingAudio] = useState(false);
+  const [connectionState, setConnectionState] = useState('connecting');
   const [systemCapabilities, setSystemCapabilities] = useState({
     video: false,
     audio: false,
@@ -55,7 +56,6 @@ export default function VideoTemplate() {
     }
   }, [activeParticipant, isVideoOn, client, stream, isConnected]);
 
-  // Cleanup Zoom resources on unmount
   useEffect(() => {
     return () => {
       if (stream && client) {
@@ -132,6 +132,33 @@ export default function VideoTemplate() {
 
       setIsConnected(true);
 
+      const connectionHandler = (payload) => {
+        switch (payload.state) {
+          case 'Closed':
+            setConnectionState('closed');
+            console.log("Session being closed");
+            break;
+          case 'Reconnecting':
+            setConnectionState('reconnecting');
+            console.log("Session reconnecting");
+            break;
+          case 'Connected':
+            setConnectionState('connected');
+            console.log("Session Connected");
+            updateParticipants(zoomClient);
+            break;
+          case 'Fail':
+            setConnectionState('Failed To Join');
+            break;
+          default:
+            break;
+        }
+      };
+
+      const videoStatisticHandler = (payload) => {
+        if (payload && payload.height) setCurrentResolution(payload.height);
+      };
+
       zoomClient.on('user-added', () => updateParticipants(zoomClient));
       zoomClient.on('user-removed', (user) => {
         if (mediaStream && user) mediaStream.detachVideo(user.userId).catch(() => {});
@@ -146,9 +173,8 @@ export default function VideoTemplate() {
         }
       });
 
-      zoomClient.on('video-statistic-data-change', (payload) => {
-        if (payload && payload.height) setCurrentResolution(payload.height);
-      });
+      zoomClient.on('video-statistic-data-change', videoStatisticHandler);
+      zoomClient.on('connection-change', connectionHandler);
 
       await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
       await mediaStream.startAudio();
@@ -326,6 +352,19 @@ export default function VideoTemplate() {
           <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
           <span className="text-white font-medium">Video Consultation</span>
           <span className="text-gray-400 text-sm">{formatTime(seconds)}</span>
+          {connectionState !== 'connected' && (
+            <span className={`px-3 py-1 text-xs rounded-full font-medium ${
+              connectionState === 'reconnecting' ? 'bg-yellow-600 text-yellow-100' :
+              connectionState === 'Failed To Join' ? 'bg-red-600 text-red-100' :
+              connectionState === 'closed' ? 'bg-gray-600 text-gray-100' :
+              'bg-blue-600 text-blue-100'
+            }`}>
+              {connectionState === 'reconnecting' ? 'Reconnecting...' :
+               connectionState === 'Failed To Join' ? 'Connection Failed' :
+               connectionState === 'closed' ? 'Disconnected' :
+               'Connecting...'}
+            </span>
+          )}
           {sessionData?.role === 1 && <span className="px-2 py-1 bg-blue-600 text-white text-xs rounded-full">Doctor</span>}
           {sessionData?.role === 0 && <span className="px-2 py-1 bg-green-600 text-white text-xs rounded-full">Patient</span>}
           {isConnected && currentResolution && (
